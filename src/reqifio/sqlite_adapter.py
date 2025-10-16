@@ -15,7 +15,7 @@ def init_db(conn: sqlite3.Connection):
         """
         CREATE TABLE IF NOT EXISTS header (
             key TEXT PRIMARY KEY,
-            value TEXT
+            the_value TEXT
         )
     """
     )
@@ -33,7 +33,7 @@ def init_db(conn: sqlite3.Connection):
         CREATE TABLE IF NOT EXISTS spec_objects (
             spec_id TEXT PRIMARY KEY,
             type TEXT,
-            values TEXT
+            the_values TEXT
         )
     """
     )
@@ -67,7 +67,9 @@ def write_doc_to_db(doc: ReqIFDocument, db_path: str):
     # Store header
     cur.execute("DELETE FROM header")
     for key, value in doc.header.items():
-        cur.execute("INSERT INTO header (key, value) VALUES (?, ?)", (key, str(value)))
+        cur.execute(
+            "INSERT INTO header (key, the_value) VALUES (?, ?)", (key, str(value))
+        )
 
     # Store requirements
     cur.execute("DELETE FROM requirements")
@@ -81,7 +83,7 @@ def write_doc_to_db(doc: ReqIFDocument, db_path: str):
     cur.execute("DELETE FROM spec_objects")
     for obj in doc.spec_objects:
         cur.execute(
-            "INSERT INTO spec_objects (spec_id, type, values) VALUES (?, ?, ?)",
+            "INSERT INTO spec_objects (spec_id, type, the_values) VALUES (?, ?, ?)",
             (obj.spec_id, obj.type, repr(obj.values)),
         )
 
@@ -117,7 +119,7 @@ def read_doc_from_db(db_path: str) -> ReqIFDocument:
     doc = ReqIFDocument()
 
     # Read header
-    cur.execute("SELECT key, value FROM header")
+    cur.execute("SELECT key, the_value FROM header")
     for key, value in cur.fetchall():
         doc.header[key] = value
 
@@ -129,7 +131,7 @@ def read_doc_from_db(db_path: str) -> ReqIFDocument:
         )
 
     # Read spec_objects
-    cur.execute("SELECT spec_id, type, values FROM spec_objects")
+    cur.execute("SELECT spec_id, type, the_values FROM spec_objects")
     for spec_id, type_text, values_str in cur.fetchall():
         # In a real implementation, use json.loads for safe serialization.
         values = eval(values_str)

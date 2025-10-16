@@ -80,24 +80,24 @@ class TestReqifWriting(unittest.TestCase):
             os.remove(temp_path)
 
 
-# class TestSqliteAdapter(unittest.TestCase):
-#     def test_db_write_and_read(self):
-#         # Create a document with one requirement.
-#         doc = model.ReqIFDocument(header={"TITLE": "DB Test"})
-#         req = model.Requirement(req_id="REQ-003", title="DB Req", description="DB Desc")
-#         doc.add_requirement(req)
+class TestSqliteAdapter(unittest.TestCase):
+    def test_db_write_and_read(self):
+        # Create a document with one requirement.
+        doc = model.ReqIFDocument(header={"TITLE": "DB Test"})
+        req = model.Requirement(req_id="REQ-003", title="DB Req", description="DB Desc")
+        doc.add_requirement(req)
 
-#         with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as temp:
-#             db_path = temp.name
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as temp:
+            db_path = temp.name
 
-#         try:
-#             sqlite_adapter.write_doc_to_db(doc, db_path)
-#             doc_from_db = sqlite_adapter.read_doc_from_db(db_path)
-#             self.assertEqual(doc_from_db.header.get("TITLE"), "DB Test")
-#             self.assertEqual(len(doc_from_db.requirements), 1)
-#             self.assertEqual(doc_from_db.requirements[0].req_id, "REQ-003")
-#         finally:
-#             os.remove(db_path)
+        try:
+            sqlite_adapter.write_doc_to_db(doc, db_path)
+            doc_from_db = sqlite_adapter.read_doc_from_db(db_path)
+            self.assertEqual(doc_from_db.header.get("TITLE"), "DB Test")
+            self.assertEqual(len(doc_from_db.requirements), 1)
+            self.assertEqual(doc_from_db.requirements[0].req_id, "REQ-003")
+        finally:
+            os.remove(db_path)
 
 
 class TestCommandManager(unittest.TestCase):
