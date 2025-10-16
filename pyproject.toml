@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reqifio"
+version = "0.1.0"
+description = "A brief description of your package."
+readme = "README.md"
+requires-python = ">=3.7"
+license = {text = "MIT"}
+authors = [
+  { name = "j-rig", email = "jrighetti@alumni.ucsd.ecu" }
+]
+dependencies = [
+#  "dependency_one>=1.0",
+#  "dependency_two>=2.0"
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent"
+]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+#your_package = ["data/*.txt", "templates/*.html"]
