@@ -1,112 +1,219 @@
 """
-reqifio/model.py
+model.py
 
-Defines the internal data model for a ReqIF document.
-The complete schema includes:
- - Header
- - Requirements
- - SpecObjects (detailed system elements)
- - SpecRelations (relationships between SpecObjects)
- - SpecTypes (definition of types for SpecObjects and Requirements)
+This module defines the data model for the ReqIF file.
+Each class maps to parts of the ReqIF XML structure.
+We use dataclasses to keep definitions concise and clear.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any
+from typing import List, Optional
+from datetime import datetime
+
+
+def parse_datetime(dt_str: str) -> datetime:
+    # Remove the colon in the timezone for datetime.fromisoformat if necessary
+    # e.g., "2017-04-25T15:44:26.000+02:00" -> "2017-04-25T15:44:26.000+0200"
+    # if dt_str[-3] == ":":
+    #     dt_str = dt_str[:-3] + dt_str[-2:]
+    # print(dt_str)
+    return datetime.fromisoformat(dt_str)
 
 
 @dataclass
-class Requirement:
-    req_id: str
+class ReqIFHeader:
+    identifier: str
+    creation_time: datetime
+    repository_id: str
+    reqif_tool_id: str
+    reqif_version: str
+    source_tool_id: str
     title: str
-    description: str
-    attributes: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DataTypeDefinitionXHTML:
+    identifier: str
+    last_change: Optional[datetime]
+    long_name: str
+
+
+@dataclass
+class EmbeddedValue:
+    key: str
+    other_content: str
+
+
+@dataclass
+class EnumValue:
+    identifier: str
+    last_change: Optional[datetime]
+    long_name: str
+    embedded_value: EmbeddedValue
+
+
+@dataclass
+class DataTypeDefinitionEnumeration:
+    identifier: str
+    last_change: Optional[datetime]
+    long_name: str
+    enum_values: List[EnumValue] = field(default_factory=list)
+
+
+@dataclass
+class DataTypeDefinitionBoolean:
+    identifier: str
+    long_name: str
+
+
+@dataclass
+class DataTypeDefinitionDate:
+    identifier: str
+    long_name: str
+
+
+@dataclass
+class DataTypeDefinitionInteger:
+    identifier: str
+    long_name: str
+
+
+@dataclass
+class DataTypeDefinitionReal:
+    identifier: str
+    long_name: str
+
+
+@dataclass
+class DataTypeDefinitionString:
+    identifier: str
+    long_name: str
+
+
+@dataclass
+class DataTypes:
+    xhtml: Optional[DataTypeDefinitionXHTML] = None
+    enumeration: Optional[DataTypeDefinitionEnumeration] = None
+    boolean: Optional[DataTypeDefinitionBoolean] = None
+    date: Optional[DataTypeDefinitionDate] = None
+    integer: Optional[DataTypeDefinitionInteger] = None
+    real: Optional[DataTypeDefinitionReal] = None
+    string: Optional[DataTypeDefinitionString] = None
+
+
+# For brevity, we combine attribute definitions in the spec-type parts.
+@dataclass
+class AttributeDefinition:
+    identifier: str
+    last_change: Optional[datetime]
+    long_name: str
+    is_editable: bool
+
+
+@dataclass
+class AttributeDefinitionXHTML(AttributeDefinition):
+    datatype_ref: str
+
+
+@dataclass
+class AttributeDefinitionEnumeration(AttributeDefinition):
+    datatype_ref: str
+    multi_valued: bool
+
+
+@dataclass
+class AttributeDefinitionBoolean(AttributeDefinition):
+    datatype_ref: str
+
+
+@dataclass
+class AttributeDefinitionDate(AttributeDefinition):
+    datatype_ref: str
+
+
+@dataclass
+class AttributeDefinitionInteger(AttributeDefinition):
+    datatype_ref: str
+
+
+@dataclass
+class AttributeDefinitionReal(AttributeDefinition):
+    datatype_ref: str
+
+
+@dataclass
+class AttributeDefinitionString(AttributeDefinition):
+    datatype_ref: str
+
+
+@dataclass
+class SpecObjectType:
+    identifier: str
+    last_change: Optional[datetime]
+    long_name: str
+    attribute_definitions: List[AttributeDefinition] = field(default_factory=list)
+
+
+@dataclass
+class SpecificationType:
+    identifier: str
+    last_change: Optional[datetime]
+    long_name: str
+    attribute_definitions: List[AttributeDefinition] = field(default_factory=list)
+
+
+@dataclass
+class AttributeValue:
+    # A simple attribute value that contains the definition reference and value as a string.
+    definition_ref: str
+    value: str
 
 
 @dataclass
 class SpecObject:
-    spec_id: str
-    type: str
-    values: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class SpecRelation:
-    relation_id: str
-    source_id: str
-    target_id: str
-    relation_type: str
-    properties: Dict[str, Any] = field(default_factory=dict)
+    identifier: str
+    last_change: Optional[datetime]
+    long_name: str
+    attributes: List[AttributeValue] = field(default_factory=list)
+    type_ref: str = ""
 
 
 @dataclass
 class SpecHierarchy:
-    """
-    Represents the SPEC-HIERARCHY element as defined in ReqIF.
-
-    Attributes:
-        hier_id: A unique identifier for the hierarchy element.
-        object_id: A reference (spec_id) to the associated SpecObject.
-        children: Nested SpecHierarchy instances representing child nodes.
-    """
-
-    hier_id: str
-    object_id: str
-    children: List["SpecHierarchy"] = field(default_factory=list)
+    identifier: str
+    last_change: Optional[datetime]
+    long_name: str
+    is_editable: bool
+    object_ref: str
 
 
 @dataclass
-class ReqIFDocument:
-    header: Dict[str, Any] = field(default_factory=dict)
-    requirements: List[Requirement] = field(default_factory=list)
-    spec_objects: List[SpecObject] = field(default_factory=list)
-    spec_relations: List[SpecRelation] = field(default_factory=list)
-    spec_types: Dict[str, Any] = field(
-        default_factory=dict
-    )  # Simplified spec types storage
+class Specification:
+    identifier: str
+    last_change: Optional[datetime]
+    long_name: str
+    type_ref: str
     spec_hierarchies: List[SpecHierarchy] = field(default_factory=list)
 
-    def add_requirement(self, requirement: Requirement):
-        self.requirements.append(requirement)
 
-    def remove_requirement(self, req_id: str):
-        self.requirements = [r for r in self.requirements if r.req_id != req_id]
+@dataclass
+class ReqIFContent:
+    data_types: DataTypes
+    spec_object_types: List[SpecObjectType] = field(default_factory=list)
+    specification_types: List[SpecificationType] = field(default_factory=list)
+    spec_objects: List[SpecObject] = field(default_factory=list)
+    specifications: List[Specification] = field(default_factory=list)
 
-    def get_requirement(self, req_id: str) -> Requirement:
-        for req in self.requirements:
-            if req.req_id == req_id:
-                return req
-        raise KeyError(f"Requirement with id {req_id} not found.")
 
-    def add_spec_object(self, spec_obj: SpecObject):
-        self.spec_objects.append(spec_obj)
+@dataclass
+class CoreContent:
+    reqif_content: ReqIFContent
 
-    def remove_spec_object(self, spec_id: str):
-        self.spec_objects = [o for o in self.spec_objects if o.spec_id != spec_id]
 
-    def get_spec_object(self, spec_id: str) -> SpecObject:
-        for obj in self.spec_objects:
-            if obj.spec_id == spec_id:
-                return obj
-        raise KeyError(f"SpecObject with id {spec_id} not found.")
-
-    def add_spec_relation(self, spec_rel: SpecRelation):
-        self.spec_relations.append(spec_rel)
-
-    def remove_spec_relation(self, relation_id: str):
-        self.spec_relations = [
-            r for r in self.spec_relations if r.relation_id != relation_id
-        ]
-
-    def get_spec_relation(self, relation_id: str) -> SpecRelation:
-        for rel in self.spec_relations:
-            if rel.relation_id == relation_id:
-                return rel
-        raise KeyError(f"SpecRelation with id {relation_id} not found.")
-
-    def add_spec_hierarchy(self, hierarchy: SpecHierarchy):
-        self.spec_hierarchies.append(hierarchy)
-
-    def remove_spec_hierarchy(self, hier_id: str):
-        self.spec_hierarchies = [
-            h for h in self.spec_hierarchies if h.hier_id != hier_id
-        ]
+@dataclass
+class ReqIF:
+    header: ReqIFHeader
+    core_content: CoreContent
+    tool_extensions: Optional[str] = (
+        None  # Placeholder for any tool-specific extensions.
+    )

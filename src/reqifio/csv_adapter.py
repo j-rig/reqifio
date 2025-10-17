@@ -1,215 +1,467 @@
 """
-reqifio/csv_adapter.py
+csv_adapter.py
 
-This module provides functions to export and import a full ReqIFDocument
-to/from CSV files using Python's standard library.
-
-It writes separate CSV files for:
-  - Header (header.csv)
-  - Requirements (requirements.csv)
-  - SpecObjects (spec_objects.csv)
-  - SpecRelations (spec_relations.csv)
-  - SpecTypes (spec_types.csv)
-
-The adapter serializes dictionary fields using repr() for simplicity.
+This module defines the CSVAdapter class which writes the complete ReqIF data model
+to CSV files and reads them back. Each entity in the data model is stored in its own CSV file.
+The design follows a table-per-entity approach similar to a relational schema.
 """
 
-import csv
 import os
-from .model import ReqIFDocument, Requirement, SpecObject, SpecRelation, SpecHierarchy
+import csv
+from datetime import datetime
+from .model import (
+    ReqIF,
+    ReqIFHeader,
+    CoreContent,
+    ReqIFContent,
+    DataTypes,
+    DataTypeDefinitionXHTML,
+    DataTypeDefinitionEnumeration,
+    EnumValue,
+    EmbeddedValue,
+    DataTypeDefinitionBoolean,
+    DataTypeDefinitionDate,
+    DataTypeDefinitionInteger,
+    DataTypeDefinitionReal,
+    DataTypeDefinitionString,
+    SpecObject,
+    AttributeValue,
+    Specification,
+    SpecHierarchy,
+)
 
 
-def write_doc_to_csv(doc: ReqIFDocument, folder_path: str):
-    """
-    Writes the provided ReqIFDocument into CSV files in the specified folder.
+class CSVAdapter:
+    def __init__(self, folder_path: str):
+        """
+        Initialize the adapter with the folder path where CSV files will be stored.
+        """
+        self.folder = folder_path
+        os.makedirs(self.folder, exist_ok=True)
 
-    Args:
-        doc: The ReqIFDocument to export.
-        folder_path: Directory where CSV files will be written.
-    """
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-
-    # Write header to header.csv (key, value).
-    header_file = os.path.join(folder_path, "header.csv")
-    with open(header_file, "w", newline="", encoding="utf-8") as hf:
-        writer = csv.writer(hf)
-        writer.writerow(["key", "value"])
-        for key, value in doc.header.items():
-            writer.writerow([key, value])
-
-    # Write requirements to requirements.csv.
-    req_file = os.path.join(folder_path, "requirements.csv")
-    with open(req_file, "w", newline="", encoding="utf-8") as rf:
-        writer = csv.writer(rf)
-        writer.writerow(["req_id", "title", "description", "attributes"])
-        for req in doc.requirements:
-            writer.writerow(
-                [req.req_id, req.title, req.description, repr(req.attributes)]
-            )
-
-    # Write spec_objects to spec_objects.csv.
-    spec_obj_file = os.path.join(folder_path, "spec_objects.csv")
-    with open(spec_obj_file, "w", newline="", encoding="utf-8") as sof:
-        writer = csv.writer(sof)
-        writer.writerow(["spec_id", "type", "values"])
-        for obj in doc.spec_objects:
-            writer.writerow([obj.spec_id, obj.type, repr(obj.values)])
-
-    # Write spec_relations to spec_relations.csv.
-    spec_rel_file = os.path.join(folder_path, "spec_relations.csv")
-    with open(spec_rel_file, "w", newline="", encoding="utf-8") as srf:
-        writer = csv.writer(srf)
-        writer.writerow(
-            ["relation_id", "source_id", "target_id", "relation_type", "properties"]
+    def write(self, reqif: ReqIF):
+        """
+        Write the complete ReqIF data model to CSV files.
+        Each CSV file corresponds to one "table" in the data model.
+        """
+        # Write header
+        self._write_csv(
+            "header.csv",
+            [
+                "identifier",
+                "creation_time",
+                "repository_id",
+                "reqif_tool_id",
+                "reqif_version",
+                "source_tool_id",
+                "title",
+            ],
+            [
+                {
+                    "identifier": reqif.header.identifier,
+                    "creation_time": reqif.header.creation_time.isoformat(),
+                    "repository_id": reqif.header.repository_id,
+                    "reqif_tool_id": reqif.header.reqif_tool_id,
+                    "reqif_version": reqif.header.reqif_version,
+                    "source_tool_id": reqif.header.source_tool_id,
+                    "title": reqif.header.title,
+                }
+            ],
         )
-        for rel in doc.spec_relations:
-            writer.writerow(
+
+        dt = reqif.core_content.reqif_content.data_types
+
+        # Write DataType XHTML
+        if dt.xhtml:
+            self._write_csv(
+                "datatype_xhtml.csv",
+                ["identifier", "last_change", "long_name"],
                 [
-                    rel.relation_id,
-                    rel.source_id,
-                    rel.target_id,
-                    rel.relation_type,
-                    repr(rel.properties),
-                ]
+                    {
+                        "identifier": dt.xhtml.identifier,
+                        "last_change": (
+                            dt.xhtml.last_change.isoformat()
+                            if dt.xhtml.last_change
+                            else ""
+                        ),
+                        "long_name": dt.xhtml.long_name,
+                    }
+                ],
             )
 
-    # Write spec_types to spec_types.csv.
-    spec_types_file = os.path.join(folder_path, "spec_types.csv")
-    with open(spec_types_file, "w", newline="", encoding="utf-8") as stf:
-        writer = csv.writer(stf)
-        writer.writerow(["type_key", "type_value"])
-        for key, value in doc.spec_types.items():
-            writer.writerow([key, value])
-
-    # Write spec_hierarchy.csv in a flat structure
-    with open(
-        os.path.join(folder_path, "spec_hierarchy.csv"),
-        "w",
-        newline="",
-        encoding="utf-8",
-    ) as shf:
-        writer = csv.writer(shf)
-        writer.writerow(["hier_id", "object_id", "parent_hier_id"])
-
-        def write_hierarchy_item(hier: SpecHierarchy, parent_hier_id):
-            writer.writerow(
-                [hier.hier_id, hier.object_id, parent_hier_id if parent_hier_id else ""]
+        # Write DataType Enumeration and its enum values
+        if dt.enumeration:
+            self._write_csv(
+                "datatype_enumeration.csv",
+                ["identifier", "last_change", "long_name"],
+                [
+                    {
+                        "identifier": dt.enumeration.identifier,
+                        "last_change": (
+                            dt.enumeration.last_change.isoformat()
+                            if dt.enumeration.last_change
+                            else ""
+                        ),
+                        "long_name": dt.enumeration.long_name,
+                    }
+                ],
             )
-            for child in hier.children:
-                write_hierarchy_item(child, hier.hier_id)
-
-        for hier in doc.spec_hierarchies:
-            write_hierarchy_item(hier, None)
-
-
-def read_doc_from_csv(folder_path: str) -> ReqIFDocument:
-    """
-    Reads a ReqIFDocument from CSV files in the specified folder.
-
-    The function expects files named:
-      header.csv, requirements.csv, spec_objects.csv,
-      spec_relations.csv, spec_types.csv.
-
-    Args:
-        folder_path: Directory containing the CSV files.
-
-    Returns:
-        A populated ReqIFDocument instance.
-    """
-    doc = ReqIFDocument()
-
-    # Read header.
-    header_file = os.path.join(folder_path, "header.csv")
-    with open(header_file, "r", newline="", encoding="utf-8") as hf:
-        reader = csv.DictReader(hf)
-        for row in reader:
-            doc.header[row["key"]] = row["value"]
-
-    # Read requirements.
-    req_file = os.path.join(folder_path, "requirements.csv")
-    with open(req_file, "r", newline="", encoding="utf-8") as rf:
-        reader = csv.DictReader(rf)
-        for row in reader:
-            req = Requirement(
-                req_id=row["req_id"],
-                title=row["title"],
-                description=row["description"],
-                attributes=eval(
-                    row["attributes"]
-                ),  # Note: using eval() for demo purposes.
+            enum_val_rows = []
+            for ev in dt.enumeration.enum_values:
+                enum_val_rows.append(
+                    {
+                        "identifier": ev.identifier,
+                        "enumeration_id": dt.enumeration.identifier,
+                        "last_change": (
+                            ev.last_change.isoformat() if ev.last_change else ""
+                        ),
+                        "long_name": ev.long_name,
+                        "embedded_key": ev.embedded_value.key,
+                        "embedded_other_content": ev.embedded_value.other_content,
+                    }
+                )
+            self._write_csv(
+                "enum_value.csv",
+                [
+                    "identifier",
+                    "enumeration_id",
+                    "last_change",
+                    "long_name",
+                    "embedded_key",
+                    "embedded_other_content",
+                ],
+                enum_val_rows,
             )
-            doc.add_requirement(req)
 
-    # Read spec_objects.
-    spec_obj_file = os.path.join(folder_path, "spec_objects.csv")
-    with open(spec_obj_file, "r", newline="", encoding="utf-8") as sof:
-        reader = csv.DictReader(sof)
-        for row in reader:
-            obj = SpecObject(
-                spec_id=row["spec_id"], type=row["type"], values=eval(row["values"])
+        # Write additional data types if available.
+        if dt.boolean:
+            self._write_csv(
+                "datatype_boolean.csv",
+                ["identifier", "long_name"],
+                [
+                    {
+                        "identifier": dt.boolean.identifier,
+                        "long_name": dt.boolean.long_name,
+                    }
+                ],
             )
-            doc.add_spec_object(obj)
-
-    # Read spec_relations.
-    spec_rel_file = os.path.join(folder_path, "spec_relations.csv")
-    with open(spec_rel_file, "r", newline="", encoding="utf-8") as srf:
-        reader = csv.DictReader(srf)
-        for row in reader:
-            rel = SpecRelation(
-                relation_id=row["relation_id"],
-                source_id=row["source_id"],
-                target_id=row["target_id"],
-                relation_type=row["relation_type"],
-                properties=eval(row["properties"]),
+        if dt.date:
+            self._write_csv(
+                "datatype_date.csv",
+                ["identifier", "long_name"],
+                [{"identifier": dt.date.identifier, "long_name": dt.date.long_name}],
             )
-            doc.add_spec_relation(rel)
-
-    # Read spec_types.
-    spec_types_file = os.path.join(folder_path, "spec_types.csv")
-    with open(spec_types_file, "r", newline="", encoding="utf-8") as stf:
-        reader = csv.DictReader(stf)
-        for row in reader:
-            doc.spec_types[row["type_key"]] = row["type_value"]
-
-    # Read spec_hierarchy.csv and rebuild the hierarchy tree
-    hier_map = {}
-    with open(
-        os.path.join(folder_path, "spec_hierarchy.csv"),
-        "r",
-        newline="",
-        encoding="utf-8",
-    ) as shf:
-        reader = csv.DictReader(shf)
-        for row in reader:
-            hier_id = row["hier_id"]
-            object_id = row["object_id"]
-            parent_hier_id = (
-                row["parent_hier_id"] if row["parent_hier_id"] != "" else None
+        if dt.integer:
+            self._write_csv(
+                "datatype_integer.csv",
+                ["identifier", "long_name"],
+                [
+                    {
+                        "identifier": dt.integer.identifier,
+                        "long_name": dt.integer.long_name,
+                    }
+                ],
             )
-            hier_map[hier_id] = {
-                "hier_id": hier_id,
-                "object_id": object_id,
-                "parent_hier_id": parent_hier_id,
-                "children": [],
-            }
+        if dt.real:
+            self._write_csv(
+                "datatype_real.csv",
+                ["identifier", "long_name"],
+                [{"identifier": dt.real.identifier, "long_name": dt.real.long_name}],
+            )
+        if dt.string:
+            self._write_csv(
+                "datatype_string.csv",
+                ["identifier", "long_name"],
+                [
+                    {
+                        "identifier": dt.string.identifier,
+                        "long_name": dt.string.long_name,
+                    }
+                ],
+            )
 
-    # Link children to their corresponding parents
-    root_nodes = []
-    for item in hier_map.values():
-        parent_id = item["parent_hier_id"]
-        if parent_id and parent_id in hier_map:
-            hier_map[parent_id]["children"].append(item)
-        else:
-            root_nodes.append(item)
-
-    def build_hierarchy(item):
-        children = [build_hierarchy(child) for child in item["children"]]
-        return SpecHierarchy(
-            hier_id=item["hier_id"], object_id=item["object_id"], children=children
+        # Write Spec Objects and their attributes.
+        spec_obj_rows = []
+        spec_obj_attr_rows = []
+        for obj in reqif.core_content.reqif_content.spec_objects:
+            spec_obj_rows.append(
+                {
+                    "identifier": obj.identifier,
+                    "last_change": (
+                        obj.last_change.isoformat() if obj.last_change else ""
+                    ),
+                    "long_name": obj.long_name,
+                    "type_ref": obj.type_ref,
+                }
+            )
+            for attr in obj.attributes:
+                spec_obj_attr_rows.append(
+                    {
+                        "spec_object_id": obj.identifier,
+                        "definition_ref": attr.definition_ref,
+                        "value": attr.value,
+                    }
+                )
+        self._write_csv(
+            "spec_object.csv",
+            ["identifier", "last_change", "long_name", "type_ref"],
+            spec_obj_rows,
+        )
+        self._write_csv(
+            "spec_object_attribute.csv",
+            ["spec_object_id", "definition_ref", "value"],
+            spec_obj_attr_rows,
         )
 
-    for root_item in root_nodes:
-        doc.spec_hierarchies.append(build_hierarchy(root_item))
+        # Write Specifications and spec hierarchies.
+        spec_rows = []
+        spec_hier_rows = []
+        for spec in reqif.core_content.reqif_content.specifications:
+            spec_rows.append(
+                {
+                    "identifier": spec.identifier,
+                    "last_change": (
+                        spec.last_change.isoformat() if spec.last_change else ""
+                    ),
+                    "long_name": spec.long_name,
+                    "type_ref": spec.type_ref,
+                }
+            )
+            for hier in spec.spec_hierarchies:
+                spec_hier_rows.append(
+                    {
+                        "identifier": hier.identifier,
+                        "specification_id": spec.identifier,
+                        "last_change": (
+                            hier.last_change.isoformat() if hier.last_change else ""
+                        ),
+                        "long_name": hier.long_name,
+                        "is_editable": "1" if hier.is_editable else "0",
+                        "object_ref": hier.object_ref,
+                    }
+                )
+        self._write_csv(
+            "specification.csv",
+            ["identifier", "last_change", "long_name", "type_ref"],
+            spec_rows,
+        )
+        self._write_csv(
+            "spec_hierarchy.csv",
+            [
+                "identifier",
+                "specification_id",
+                "last_change",
+                "long_name",
+                "is_editable",
+                "object_ref",
+            ],
+            spec_hier_rows,
+        )
 
-    return doc
+        # Write tool extensions (if any) as a single row.
+        self._write_csv(
+            "tool_extensions.csv",
+            ["id", "content"],
+            [
+                {
+                    "id": "1",
+                    "content": reqif.tool_extensions if reqif.tool_extensions else "",
+                }
+            ],
+        )
+
+    def read(self) -> ReqIF:
+        """
+        Read the complete ReqIF data model from CSV files and reassemble it into a ReqIF instance.
+        """
+        # Read header.
+        header_row = self._read_csv("header.csv")[0]
+        header = ReqIFHeader(
+            identifier=header_row["identifier"],
+            creation_time=datetime.fromisoformat(header_row["creation_time"]),
+            repository_id=header_row["repository_id"],
+            reqif_tool_id=header_row["reqif_tool_id"],
+            reqif_version=header_row["reqif_version"],
+            source_tool_id=header_row["source_tool_id"],
+            title=header_row["title"],
+        )
+
+        dt = DataTypes()
+        # Read DataType XHTML.
+        xhtml_rows = self._read_csv("datatype_xhtml.csv")
+        if xhtml_rows:
+            row = xhtml_rows[0]
+            dt.xhtml = DataTypeDefinitionXHTML(
+                identifier=row["identifier"],
+                last_change=(
+                    datetime.fromisoformat(row["last_change"])
+                    if row["last_change"]
+                    else None
+                ),
+                long_name=row["long_name"],
+            )
+        # Read DataType Enumeration.
+        enum_rows = self._read_csv("datatype_enumeration.csv")
+        if enum_rows:
+            row = enum_rows[0]
+            dt_enum = DataTypeDefinitionEnumeration(
+                identifier=row["identifier"],
+                last_change=(
+                    datetime.fromisoformat(row["last_change"])
+                    if row["last_change"]
+                    else None
+                ),
+                long_name=row["long_name"],
+                enum_values=[],
+            )
+            # Read corresponding enum values.
+            for erow in self._read_csv("enum_value.csv"):
+                if erow["enumeration_id"] == dt_enum.identifier:
+                    ev = EnumValue(
+                        identifier=erow["identifier"],
+                        last_change=(
+                            datetime.fromisoformat(erow["last_change"])
+                            if erow["last_change"]
+                            else None
+                        ),
+                        long_name=erow["long_name"],
+                        embedded_value=EmbeddedValue(
+                            key=erow["embedded_key"],
+                            other_content=erow["embedded_other_content"],
+                        ),
+                    )
+                    dt_enum.enum_values.append(ev)
+            dt.enumeration = dt_enum
+
+        # Additional data types.
+        bool_rows = self._read_csv("datatype_boolean.csv")
+        if bool_rows:
+            row = bool_rows[0]
+            dt.boolean = DataTypeDefinitionBoolean(
+                identifier=row["identifier"], long_name=row["long_name"]
+            )
+
+        date_rows = self._read_csv("datatype_date.csv")
+        if date_rows:
+            row = date_rows[0]
+            dt.date = DataTypeDefinitionDate(
+                identifier=row["identifier"], long_name=row["long_name"]
+            )
+
+        int_rows = self._read_csv("datatype_integer.csv")
+        if int_rows:
+            row = int_rows[0]
+            dt.integer = DataTypeDefinitionInteger(
+                identifier=row["identifier"], long_name=row["long_name"]
+            )
+
+        real_rows = self._read_csv("datatype_real.csv")
+        if real_rows:
+            row = real_rows[0]
+            dt.real = DataTypeDefinitionReal(
+                identifier=row["identifier"], long_name=row["long_name"]
+            )
+
+        str_rows = self._read_csv("datatype_string.csv")
+        if str_rows:
+            row = str_rows[0]
+            dt.string = DataTypeDefinitionString(
+                identifier=row["identifier"], long_name=row["long_name"]
+            )
+
+        # Read Spec Objects and attributes.
+        spec_objects = []
+        spec_obj_rows = self._read_csv("spec_object.csv")
+        spec_obj_attr_rows = self._read_csv("spec_object_attribute.csv")
+        for sobj in spec_obj_rows:
+            attrs = []
+            for attr in spec_obj_attr_rows:
+                if attr["spec_object_id"] == sobj["identifier"]:
+                    attrs.append(
+                        AttributeValue(
+                            definition_ref=attr["definition_ref"], value=attr["value"]
+                        )
+                    )
+            spec_objects.append(
+                SpecObject(
+                    identifier=sobj["identifier"],
+                    last_change=(
+                        datetime.fromisoformat(sobj["last_change"])
+                        if sobj["last_change"]
+                        else None
+                    ),
+                    long_name=sobj["long_name"],
+                    type_ref=sobj["type_ref"],
+                    attributes=attrs,
+                )
+            )
+
+        # Read Specifications and spec hierarchies.
+        specifications = []
+        spec_rows = self._read_csv("specification.csv")
+        spec_hier_rows = self._read_csv("spec_hierarchy.csv")
+        for sperow in spec_rows:
+            hierarchies = []
+            for hrow in spec_hier_rows:
+                if hrow["specification_id"] == sperow["identifier"]:
+                    hierarchies.append(
+                        SpecHierarchy(
+                            identifier=hrow["identifier"],
+                            last_change=(
+                                datetime.fromisoformat(hrow["last_change"])
+                                if hrow["last_change"]
+                                else None
+                            ),
+                            long_name=hrow["long_name"],
+                            is_editable=hrow["is_editable"] == "1",
+                            object_ref=hrow["object_ref"],
+                        )
+                    )
+            specifications.append(
+                Specification(
+                    identifier=sperow["identifier"],
+                    last_change=(
+                        datetime.fromisoformat(sperow["last_change"])
+                        if sperow["last_change"]
+                        else None
+                    ),
+                    long_name=sperow["long_name"],
+                    type_ref=sperow["type_ref"],
+                    spec_hierarchies=hierarchies,
+                )
+            )
+
+        # Read tool extensions.
+        tool_rows = self._read_csv("tool_extensions.csv")
+        tool_extensions = tool_rows[0]["content"] if tool_rows else None
+
+        reqif_content = ReqIFContent(
+            data_types=dt, spec_objects=spec_objects, specifications=specifications
+        )
+        core_content = CoreContent(reqif_content=reqif_content)
+        return ReqIF(
+            header=header, core_content=core_content, tool_extensions=tool_extensions
+        )
+
+    def _write_csv(self, filename, fieldnames, rows):
+        """
+        Helper method to write rows to a CSV file with the given fieldnames.
+        """
+        file_path = os.path.join(self.folder, filename)
+        with open(file_path, "w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+
+    def _read_csv(self, filename):
+        """
+        Helper method to read CSV file and return a list of dictionaries.
+        Returns empty list if the file does not exist.
+        """
+        file_path = os.path.join(self.folder, filename)
+        if not os.path.exists(file_path):
+            return []
+        with open(file_path, "r", newline="", encoding="utf-8") as csvfile:
+            reader = csv.DictReader(csvfile)
+            return list(reader)

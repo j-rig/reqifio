@@ -1,51 +1,63 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
-cli.py
+convert_reqif.py
 
-A command-line interface using Click to convert a ReqIF file into CSV files and/or a SQLite database.
-It reads a ReqIF file using reqifio.reqif_parser, writes CSV files using reqifio.csv_adapter,
-and writes to a SQLite database using reqifio.sqlite_adapter.
+This script uses Click to read a ReqIF file and output either a SQLite database or a collection of CSV files.
+Usage examples:
+    python convert_reqif.py input.reqif --mode sqlite --output reqif.db
+    python convert_reqif.py input.reqif --mode csv --output ./csv_output
 """
 
+import sys
 import click
-from reqifio import reqif_parser, csv_adapter, sqlite_adapter
+from .reqif_parser import ReqIFParser
+from .sqlite_adapter import SQLiteAdapter
+from .csv_adapter import CSVAdapter
 
 
 @click.command()
-@click.argument("reqif_file", type=click.Path(exists=True))
+@click.argument("input_file", type=click.Path(exists=True))
 @click.option(
-    "--csv-folder",
-    type=click.Path(file_okay=False),
-    help="Output folder where CSV files will be written.",
+    "--mode",
+    "-m",
+    type=click.Choice(["sqlite", "csv"], case_sensitive=False),
+    required=True,
+    help='Output mode: "sqlite" or "csv".',
 )
-@click.option("--sqlite-file", type=click.Path(), help="Output SQLite database file.")
-def main(reqif_file, csv_folder, sqlite_file):
+@click.option(
+    "--output",
+    "-o",
+    type=str,
+    required=True,
+    help="Output target. For sqlite, provide a database file path; for csv, provide a folder path.",
+)
+def convert_reqif(input_file, mode, output):
     """
-    Converts a ReqIF file into CSV files and/or a SQLite database.
-
-    REQIF_FILE is the path to the input ReqIF XML file.
-
-    Use --csv-folder to specify an output folder for CSV files and/or
-    --sqlite-file to specify an output SQLite database file.
+    Convert a ReqIF file (INPUT_FILE) to a SQLite database or CSV files based on MODE.
     """
-    click.echo(f"Parsing ReqIF file: {reqif_file}")
-    document = reqif_parser.parse_reqif_file(reqif_file)
+    click.echo(f"Parsing ReqIF from {input_file} ...")
+    parser = ReqIFParser(input_file)
+    reqif_model = parser.parse()
 
-    if csv_folder:
-        click.echo(f"Writing CSV files to folder: {csv_folder}")
-        csv_adapter.write_doc_to_csv(document, csv_folder)
-        click.echo("CSV conversion completed.")
+    if mode.lower() == "sqlite":
+        click.echo(f"Writing ReqIF model to SQLite DB: {output} ...")
+        adapter = SQLiteAdapter(output)
+        adapter.create_schema()
+        adapter.write(reqif_model)
+        click.echo("SQLite output created successfully.")
+    elif mode.lower() == "csv":
+        click.echo(f"Writing ReqIF model to CSV files in folder: {output} ...")
+        adapter = CSVAdapter(output)
+        adapter.write(reqif_model)
+        click.echo("CSV output created successfully.")
+    else:
+        click.echo("Unsupported mode. Use 'sqlite' or 'csv'.")
+        sys.exit(1)
 
-    if sqlite_file:
-        click.echo(f"Writing to SQLite database file: {sqlite_file}")
-        sqlite_adapter.write_doc_to_db(document, sqlite_file)
-        click.echo("SQLite database conversion completed.")
 
-    if not csv_folder and not sqlite_file:
-        click.echo(
-            "No output option provided. Please specify either --csv-folder or --sqlite-file."
-        )
+def main():
+    convert_reqif()
 
 
 if __name__ == "__main__":
-    main()
+    convert_reqif()

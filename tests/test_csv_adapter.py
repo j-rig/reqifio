@@ -1,97 +1,180 @@
-#!/usr/bin/env python3
 """
-tests/test_csv_adapter.py
+test_csv_adapter.py
 
-Unit tests for the CSV adapter in the reqifio package.
+This module contains test cases for reading and writing the complete ReqIF
+data model to CSV files using the CSVAdapter from csv_adapter.py.
 """
 
 import os
+import shutil
 import tempfile
 import unittest
-from reqifio import model, csv_adapter
+from datetime import datetime
+
+from reqifio.model import (
+    ReqIF,
+    ReqIFHeader,
+    CoreContent,
+    ReqIFContent,
+    DataTypes,
+    DataTypeDefinitionXHTML,
+    SpecObject,
+    AttributeValue,
+    Specification,
+    SpecHierarchy,
+)
+from reqifio.csv_adapter import CSVAdapter
 
 
-class TestCsvAdapter(unittest.TestCase):
+def create_sample_reqif():
+    """
+    Helper function to create a minimal ReqIF data model instance.
+    """
+    header = ReqIFHeader(
+        identifier="header-1",
+        creation_time=datetime.now(),
+        repository_id="repo-1",
+        reqif_tool_id="ToolCSV",
+        reqif_version="1.0",
+        source_tool_id="SourceCSV",
+        title="Sample ReqIF CSV",
+    )
+    dt_xhtml = DataTypeDefinitionXHTML(
+        identifier="dt_xhtml_1", last_change=datetime.now(), long_name="XHTMLString"
+    )
+    data_types = DataTypes(xhtml=dt_xhtml)
+    spec_obj = SpecObject(
+        identifier="obj-1",
+        last_change=datetime.now(),
+        long_name="Requirement-1",
+        type_ref="type-req",
+        attributes=[
+            AttributeValue(definition_ref="attr-1", value="CSV Test Requirement")
+        ],
+    )
+    spec_hierarchy = SpecHierarchy(
+        identifier="hier-1",
+        last_change=datetime.now(),
+        long_name="Requirement-1",
+        is_editable=True,
+        object_ref="obj-1",
+    )
+    specification = Specification(
+        identifier="spec-1",
+        last_change=datetime.now(),
+        long_name="Module-CSV",
+        type_ref="spec-type-1",
+        spec_hierarchies=[spec_hierarchy],
+    )
+    reqif_content = ReqIFContent(
+        data_types=data_types, spec_objects=[spec_obj], specifications=[specification]
+    )
+    core_content = CoreContent(reqif_content=reqif_content)
+    return ReqIF(
+        header=header, core_content=core_content, tool_extensions="<extensions/>"
+    )
+
+
+class TestCSVAdapter(unittest.TestCase):
+
     def setUp(self):
-        # Create a sample ReqIFDocument with all elements.
-        self.doc = model.ReqIFDocument(
-            header={"TITLE": "CSV Test", "CREATOR": "UnitTest"}
+        # Create a temporary directory to store CSV files.
+        self.temp_dir = tempfile.mkdtemp()
+        self.adapter = CSVAdapter(self.temp_dir)
+        self.sample_reqif = create_sample_reqif()
+
+    def tearDown(self):
+        # Remove the temporary directory and its contents.
+        shutil.rmtree(self.temp_dir)
+
+    def test_write_and_read(self):
+        """
+        Test writing a ReqIF model to CSV files and reading it back.
+        """
+        # Write sample ReqIF data to CSV files.
+        self.adapter.write(self.sample_reqif)
+
+        # Read the data model back from CSV files.
+        reqif_read = self.adapter.read()
+
+        # Verify header values.
+        self.assertEqual(
+            reqif_read.header.identifier, self.sample_reqif.header.identifier
         )
-        self.doc.add_requirement(
-            model.Requirement(
-                req_id="REQ-CSV-1",
-                title="CSV Requirement",
-                description="Testing CSV export/import.",
-                attributes={"priority": "high"},
-            )
+        self.assertEqual(reqif_read.header.title, self.sample_reqif.header.title)
+
+        # Verify DataType XHTML.
+        self.assertIsNotNone(reqif_read.core_content.reqif_content.data_types.xhtml)
+        self.assertEqual(
+            reqif_read.core_content.reqif_content.data_types.xhtml.identifier,
+            self.sample_reqif.core_content.reqif_content.data_types.xhtml.identifier,
         )
-        self.doc.add_spec_object(
-            model.SpecObject(
-                spec_id="SPEC-CSV-1",
-                type="TestObject",
-                values={"value": "123", "unit": "ms"},
-            )
+
+        # Verify Spec Objects and Attributes.
+        self.assertEqual(
+            len(reqif_read.core_content.reqif_content.spec_objects),
+            len(self.sample_reqif.core_content.reqif_content.spec_objects),
         )
-        self.doc.add_spec_relation(
-            model.SpecRelation(
-                relation_id="REL-CSV-1",
-                source_id="SPEC-CSV-1",
-                target_id="REQ-CSV-1",
-                relation_type="satisfies",
-                properties={"trace": "yes"},
-            )
+        orig_obj = self.sample_reqif.core_content.reqif_content.spec_objects[0]
+        read_obj = reqif_read.core_content.reqif_content.spec_objects[0]
+        self.assertEqual(orig_obj.identifier, read_obj.identifier)
+        self.assertEqual(orig_obj.long_name, read_obj.long_name)
+        self.assertEqual(len(orig_obj.attributes), len(read_obj.attributes))
+        self.assertEqual(orig_obj.attributes[0].value, read_obj.attributes[0].value)
+
+        # Verify Specifications and Spec Hierarchies.
+        self.assertEqual(
+            len(reqif_read.core_content.reqif_content.specifications),
+            len(self.sample_reqif.core_content.reqif_content.specifications),
         )
-        self.doc.spec_types["CustomType"] = "A custom type definition"
+        orig_spec = self.sample_reqif.core_content.reqif_content.specifications[0]
+        read_spec = reqif_read.core_content.reqif_content.specifications[0]
+        self.assertEqual(orig_spec.identifier, read_spec.identifier)
+        self.assertEqual(
+            len(orig_spec.spec_hierarchies), len(read_spec.spec_hierarchies)
+        )
+        self.assertEqual(
+            orig_spec.spec_hierarchies[0].object_ref,
+            read_spec.spec_hierarchies[0].object_ref,
+        )
 
-    def test_write_and_read_csv(self):
-        # Write the test document to a temporary directory.
-        with tempfile.TemporaryDirectory() as temp_dir:
-            csv_adapter.write_doc_to_csv(self.doc, temp_dir)
+        # Verify tool extensions.
+        self.assertEqual(reqif_read.tool_extensions, self.sample_reqif.tool_extensions)
 
-            # Ensure all expected CSV files exist.
-            expected_files = [
-                "header.csv",
-                "requirements.csv",
-                "spec_objects.csv",
-                "spec_relations.csv",
-                "spec_types.csv",
-            ]
-            for f in expected_files:
-                self.assertTrue(
-                    os.path.exists(os.path.join(temp_dir, f)),
-                    f"{f} should exist in {temp_dir}",
-                )
-
-            # Read document back from CSV files.
-            doc_from_csv = csv_adapter.read_doc_from_csv(temp_dir)
-
-            # Verify header data.
-            self.assertEqual(doc_from_csv.header.get("TITLE"), "CSV Test")
-            self.assertEqual(doc_from_csv.header.get("CREATOR"), "UnitTest")
-
-            # Verify requirements.
-            self.assertEqual(len(doc_from_csv.requirements), 1)
-            req = doc_from_csv.requirements[0]
-            self.assertEqual(req.req_id, "REQ-CSV-1")
-            self.assertEqual(req.attributes["priority"], "high")
-
-            # Verify spec objects.
-            self.assertEqual(len(doc_from_csv.spec_objects), 1)
-            spec_obj = doc_from_csv.spec_objects[0]
-            self.assertEqual(spec_obj.spec_id, "SPEC-CSV-1")
-            self.assertEqual(spec_obj.values["unit"], "ms")
-
-            # Verify spec relations.
-            self.assertEqual(len(doc_from_csv.spec_relations), 1)
-            spec_rel = doc_from_csv.spec_relations[0]
-            self.assertEqual(spec_rel.relation_id, "REL-CSV-1")
-            self.assertEqual(spec_rel.properties["trace"], "yes")
-
-            # Verify spec types.
-            self.assertIn("CustomType", doc_from_csv.spec_types)
-            self.assertEqual(
-                doc_from_csv.spec_types["CustomType"], "A custom type definition"
-            )
+    def test_csv_files_created(self):
+        """
+        Test that CSV files are created in the designated folder.
+        """
+        self.adapter.write(self.sample_reqif)
+        expected_files = [
+            "header.csv",
+            "datatype_xhtml.csv",
+            "datatype_enumeration.csv",
+            "enum_value.csv",
+            "datatype_boolean.csv",
+            "datatype_date.csv",
+            "datatype_integer.csv",
+            "datatype_real.csv",
+            "datatype_string.csv",
+            "spec_object.csv",
+            "spec_object_attribute.csv",
+            "specification.csv",
+            "spec_hierarchy.csv",
+            "tool_extensions.csv",
+        ]
+        # Some files might not be generated if the data is not provided,
+        # but header.csv, datatype_xhtml.csv, spec_object.csv, specification.csv, and tool_extensions.csv
+        # are expected.
+        necessary_files = [
+            "header.csv",
+            "datatype_xhtml.csv",
+            "spec_object.csv",
+            "specification.csv",
+            "tool_extensions.csv",
+        ]
+        for fname in necessary_files:
+            fpath = os.path.join(self.temp_dir, fname)
+            self.assertTrue(os.path.exists(fpath), f"Expected file {fname} not found.")
 
 
 if __name__ == "__main__":

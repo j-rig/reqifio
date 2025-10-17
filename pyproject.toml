@@ -13,6 +13,7 @@ authors = [
   { name = "j-rig", email = "jrighetti@alumni.ucsd.ecu" }
 ]
 dependencies = [
+  "click",
 #  "dependency_one>=1.0",
 #  "dependency_two>=2.0"
 ]

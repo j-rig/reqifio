@@ -12,13 +12,13 @@ This module initializes the reqif_lib package. We expose the primary modules:
 The library complies with ReqIF 1.1 and industrial use cases while using only native Python libraries.
 """
 
-from . import reqif_parser, reqif_writer, sqlite_adapter, csv_adapter, command, model
+from . import reqif_parser, reqif_writer, sqlite_adapter, csv_adapter, cli, model
 
 __all__ = [
     "reqif_parser",
     "reqif_writer",
     "sqlite_adapter",
     "csv_adapter",
-    "command",
+    "clai",
     "model",
 ]

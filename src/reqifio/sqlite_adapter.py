@@ -1,231 +1,503 @@
 """
-reqifio/sqlite_adapter.py
+sqlite_adapter.py
 
-Stores and retrieves the full ReqIF schema in an SQLite database using the sqlite3 library.
-Added tables include those for header, requirements, spec_objects, spec_relations, and spec_types.
+This module defines the SQLiteAdapter class which writes the complete ReqIF data model
+to a SQLite database and reads it back. The schema is created in separate tables for
+the header, each data type, spec objects and specifications (with hierarchies and attributes).
+
+Design:
+- The adapter creates a new SQLite database (or uses an existing one) with a simple schema.
+- Writing: The write() method inserts (or REPLACE) rows for each part of the model.
+- Reading: The read() method reassembles the model by loading all tables and creating
+  instances of the model classes.
 """
 
 import sqlite3
-from .model import ReqIFDocument, Requirement, SpecObject, SpecRelation, SpecHierarchy
+from datetime import datetime
+from .model import (
+    ReqIF,
+    ReqIFHeader,
+    CoreContent,
+    ReqIFContent,
+    DataTypes,
+    DataTypeDefinitionXHTML,
+    DataTypeDefinitionEnumeration,
+    EnumValue,
+    EmbeddedValue,
+    DataTypeDefinitionBoolean,
+    DataTypeDefinitionDate,
+    DataTypeDefinitionInteger,
+    DataTypeDefinitionReal,
+    DataTypeDefinitionString,
+    SpecObject,
+    AttributeValue,
+    Specification,
+    SpecHierarchy,
+)
 
 
-def init_db(conn: sqlite3.Connection):
-    cur = conn.cursor()
-    cur.execute(
+class SQLiteAdapter:
+    def __init__(self, db_path: str):
         """
-        CREATE TABLE IF NOT EXISTS header (
-            key TEXT PRIMARY KEY,
-            the_value TEXT
-        )
-    """
-    )
-    cur.execute(
+        Initialize the adapter with a path to the SQLite database.
         """
-        CREATE TABLE IF NOT EXISTS requirements (
-            req_id TEXT PRIMARY KEY,
-            title TEXT,
-            description TEXT
-        )
-    """
-    )
-    cur.execute(
+        self.db_path = db_path
+
+    def create_schema(self):
         """
-        CREATE TABLE IF NOT EXISTS spec_objects (
-            spec_id TEXT PRIMARY KEY,
-            type TEXT,
-            the_values TEXT
-        )
-    """
-    )
-    cur.execute(
+        Create the SQLite database schema with tables for each entity in the data model.
         """
-        CREATE TABLE IF NOT EXISTS spec_relations (
-            relation_id TEXT PRIMARY KEY,
-            source_id TEXT,
-            target_id TEXT,
-            relation_type TEXT,
-            properties TEXT
-        )
-    """
-    )
-    cur.execute(
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        # ReqIF header.
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS reqif_header (
+                identifier TEXT PRIMARY KEY,
+                creation_time TEXT,
+                repository_id TEXT,
+                reqif_tool_id TEXT,
+                reqif_version TEXT,
+                source_tool_id TEXT,
+                title TEXT
+            )
         """
-        CREATE TABLE IF NOT EXISTS spec_types (
-            type_key TEXT PRIMARY KEY,
-            type_value TEXT
         )
-    """
-    )
-    # SpecHierarchy table: flat structure with parent references.
-    cur.execute(
+        # DataTypes tables.
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS datatype_xhtml (
+                identifier TEXT PRIMARY KEY,
+                last_change TEXT,
+                long_name TEXT
+            )
         """
-        CREATE TABLE IF NOT EXISTS spec_hierarchy (
-            hier_id TEXT PRIMARY KEY,
-            object_id TEXT,
-            parent_hier_id TEXT
         )
-    """
-    )
-    conn.commit()
-
-
-def write_doc_to_db(doc: ReqIFDocument, db_path: str):
-    conn = sqlite3.connect(db_path)
-    init_db(conn)
-    cur = conn.cursor()
-
-    # Store header
-    cur.execute("DELETE FROM header")
-    for key, value in doc.header.items():
-        cur.execute(
-            "INSERT INTO header (key, the_value) VALUES (?, ?)", (key, str(value))
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS datatype_enumeration (
+                identifier TEXT PRIMARY KEY,
+                last_change TEXT,
+                long_name TEXT
+            )
+        """
         )
-
-    # Store requirements
-    cur.execute("DELETE FROM requirements")
-    for req in doc.requirements:
-        cur.execute(
-            "INSERT INTO requirements (req_id, title, description) VALUES (?, ?, ?)",
-            (req.req_id, req.title, req.description),
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS enum_value (
+                identifier TEXT PRIMARY KEY,
+                enumeration_id TEXT,
+                last_change TEXT,
+                long_name TEXT,
+                embedded_key TEXT,
+                embedded_other_content TEXT
+            )
+        """
         )
-
-    # Store spec_objects
-    cur.execute("DELETE FROM spec_objects")
-    for obj in doc.spec_objects:
-        cur.execute(
-            "INSERT INTO spec_objects (spec_id, type, the_values) VALUES (?, ?, ?)",
-            (obj.spec_id, obj.type, repr(obj.values)),
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS datatype_boolean (
+                identifier TEXT PRIMARY KEY,
+                long_name TEXT
+            )
+        """
         )
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS datatype_date (
+                identifier TEXT PRIMARY KEY,
+                long_name TEXT
+            )
+        """
+        )
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS datatype_integer (
+                identifier TEXT PRIMARY KEY,
+                long_name TEXT
+            )
+        """
+        )
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS datatype_real (
+                identifier TEXT PRIMARY KEY,
+                long_name TEXT
+            )
+        """
+        )
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS datatype_string (
+                identifier TEXT PRIMARY KEY,
+                long_name TEXT
+            )
+        """
+        )
+        # Spec Objects tables.
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS spec_object (
+                identifier TEXT PRIMARY KEY,
+                last_change TEXT,
+                long_name TEXT,
+                type_ref TEXT
+            )
+        """
+        )
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS spec_object_attribute (
+                spec_object_id TEXT,
+                definition_ref TEXT,
+                value TEXT
+            )
+        """
+        )
+        # Specifications tables.
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS specification (
+                identifier TEXT PRIMARY KEY,
+                last_change TEXT,
+                long_name TEXT,
+                type_ref TEXT
+            )
+        """
+        )
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS spec_hierarchy (
+                identifier TEXT PRIMARY KEY,
+                specification_id TEXT,
+                last_change TEXT,
+                long_name TEXT,
+                is_editable INTEGER,
+                object_ref TEXT
+            )
+        """
+        )
+        # Tool extensions stored as a single row.
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tool_extensions (
+                id INTEGER PRIMARY KEY,
+                content TEXT
+            )
+        """
+        )
+        conn.commit()
+        conn.close()
 
-    # Store spec_relations
-    cur.execute("DELETE FROM spec_relations")
-    for rel in doc.spec_relations:
-        cur.execute(
-            "INSERT INTO spec_relations (relation_id, source_id, target_id, relation_type, properties) VALUES (?, ?, ?, ?, ?)",
+    def write(self, reqif: ReqIF):
+        """
+        Write the complete ReqIF data model to the SQLite database.
+        """
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        # Write ReqIF header.
+        c.execute(
+            """
+            INSERT OR REPLACE INTO reqif_header 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
             (
-                rel.relation_id,
-                rel.source_id,
-                rel.target_id,
-                rel.relation_type,
-                repr(rel.properties),
+                reqif.header.identifier,
+                reqif.header.creation_time.isoformat(),
+                reqif.header.repository_id,
+                reqif.header.reqif_tool_id,
+                reqif.header.reqif_version,
+                reqif.header.source_tool_id,
+                reqif.header.title,
             ),
         )
-
-    # Store spec_types
-    cur.execute("DELETE FROM spec_types")
-    for key, value in doc.spec_types.items():
-        cur.execute(
-            "INSERT INTO spec_types (type_key, type_value) VALUES (?, ?)",
-            (key, str(value)),
-        )
-
-    # Store spec hierarchy.
-    cur.execute("DELETE FROM spec_hierarchy")
-    for hier in doc.spec_hierarchies:
-        _store_hierarchy(cur, hier, parent_hier_id=None)
-
-    conn.commit()
-    conn.close()
-
-
-def _store_hierarchy(cur: sqlite3.Cursor, hier: SpecHierarchy, parent_hier_id):
-    """
-    Recursively stores a SpecHierarchy instance (and its children) in the database.
-
-    Args:
-        cur: SQLite cursor.
-        hier: SpecHierarchy instance.
-        parent_hier_id: The parent's hierarchy ID (or None if top-level).
-    """
-    cur.execute(
-        """
-        INSERT INTO spec_hierarchy (hier_id, object_id, parent_hier_id)
-        VALUES (?, ?, ?)
-    """,
-        (hier.hier_id, hier.object_id, parent_hier_id),
-    )
-    for child in hier.children:
-        _store_hierarchy(cur, child, parent_hier_id=hier.hier_id)
-
-
-def read_doc_from_db(db_path: str) -> ReqIFDocument:
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-    doc = ReqIFDocument()
-
-    # Read header
-    cur.execute("SELECT key, the_value FROM header")
-    for key, value in cur.fetchall():
-        doc.header[key] = value
-
-    # Read requirements
-    cur.execute("SELECT req_id, title, description FROM requirements")
-    for req_id, title, description in cur.fetchall():
-        doc.add_requirement(
-            Requirement(req_id=req_id, title=title, description=description)
-        )
-
-    # Read spec_objects
-    cur.execute("SELECT spec_id, type, the_values FROM spec_objects")
-    for spec_id, type_text, values_str in cur.fetchall():
-        # In a real implementation, use json.loads for safe serialization.
-        values = eval(values_str)
-        doc.add_spec_object(SpecObject(spec_id=spec_id, type=type_text, values=values))
-
-    # Read spec_relations
-    cur.execute(
-        "SELECT relation_id, source_id, target_id, relation_type, properties FROM spec_relations"
-    )
-    for relation_id, source_id, target_id, relation_type, props_str in cur.fetchall():
-        properties = eval(props_str)
-        doc.add_spec_relation(
-            SpecRelation(
-                relation_id=relation_id,
-                source_id=source_id,
-                target_id=target_id,
-                relation_type=relation_type,
-                properties=properties,
+        dt = reqif.core_content.reqif_content.data_types
+        # Write DataType XHTML.
+        if dt.xhtml:
+            c.execute(
+                """
+                INSERT OR REPLACE INTO datatype_xhtml
+                VALUES (?, ?, ?)
+            """,
+                (
+                    dt.xhtml.identifier,
+                    dt.xhtml.last_change.isoformat() if dt.xhtml.last_change else None,
+                    dt.xhtml.long_name,
+                ),
             )
+        # Write DataType Enumeration and its enum_values.
+        if dt.enumeration:
+            c.execute(
+                """
+                INSERT OR REPLACE INTO datatype_enumeration
+                VALUES (?, ?, ?)
+            """,
+                (
+                    dt.enumeration.identifier,
+                    (
+                        dt.enumeration.last_change.isoformat()
+                        if dt.enumeration.last_change
+                        else None
+                    ),
+                    dt.enumeration.long_name,
+                ),
+            )
+            for ev in dt.enumeration.enum_values:
+                c.execute(
+                    """
+                    INSERT OR REPLACE INTO enum_value
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        ev.identifier,
+                        dt.enumeration.identifier,
+                        ev.last_change.isoformat() if ev.last_change else None,
+                        ev.long_name,
+                        ev.embedded_value.key,
+                        ev.embedded_value.other_content,
+                    ),
+                )
+        # Write additional data types.
+        if dt.boolean:
+            c.execute(
+                """
+                INSERT OR REPLACE INTO datatype_boolean
+                VALUES (?, ?)
+            """,
+                (dt.boolean.identifier, dt.boolean.long_name),
+            )
+        if dt.date:
+            c.execute(
+                """
+                INSERT OR REPLACE INTO datatype_date
+                VALUES (?, ?)
+            """,
+                (dt.date.identifier, dt.date.long_name),
+            )
+        if dt.integer:
+            c.execute(
+                """
+                INSERT OR REPLACE INTO datatype_integer
+                VALUES (?, ?)
+            """,
+                (dt.integer.identifier, dt.integer.long_name),
+            )
+        if dt.real:
+            c.execute(
+                """
+                INSERT OR REPLACE INTO datatype_real
+                VALUES (?, ?)
+            """,
+                (dt.real.identifier, dt.real.long_name),
+            )
+        if dt.string:
+            c.execute(
+                """
+                INSERT OR REPLACE INTO datatype_string
+                VALUES (?, ?)
+            """,
+                (dt.string.identifier, dt.string.long_name),
+            )
+        # Write Spec Objects and their attributes.
+        for obj in reqif.core_content.reqif_content.spec_objects:
+            c.execute(
+                """
+                INSERT OR REPLACE INTO spec_object
+                VALUES (?, ?, ?, ?)
+            """,
+                (
+                    obj.identifier,
+                    obj.last_change.isoformat() if obj.last_change else None,
+                    obj.long_name,
+                    obj.type_ref,
+                ),
+            )
+            for attr in obj.attributes:
+                c.execute(
+                    """
+                    INSERT INTO spec_object_attribute
+                    VALUES (?, ?, ?)
+                """,
+                    (obj.identifier, attr.definition_ref, attr.value),
+                )
+        # Write Specifications and spec hierarchies.
+        for spec in reqif.core_content.reqif_content.specifications:
+            c.execute(
+                """
+                INSERT OR REPLACE INTO specification
+                VALUES (?, ?, ?, ?)
+            """,
+                (
+                    spec.identifier,
+                    spec.last_change.isoformat() if spec.last_change else None,
+                    spec.long_name,
+                    spec.type_ref,
+                ),
+            )
+            for hier in spec.spec_hierarchies:
+                c.execute(
+                    """
+                    INSERT OR REPLACE INTO spec_hierarchy
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        hier.identifier,
+                        spec.identifier,
+                        hier.last_change.isoformat() if hier.last_change else None,
+                        hier.long_name,
+                        1 if hier.is_editable else 0,
+                        hier.object_ref,
+                    ),
+                )
+        # Write Tool Extensions.
+        if reqif.tool_extensions:
+            c.execute(
+                """
+                INSERT OR REPLACE INTO tool_extensions (id, content) VALUES (1, ?)
+            """,
+                (reqif.tool_extensions,),
+            )
+        conn.commit()
+        conn.close()
+
+    def read(self) -> ReqIF:
+        """
+        Read the complete ReqIF data model from the SQLite database and
+        reassemble it into a ReqIF instance.
+        """
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        # Read header.
+        c.execute("SELECT * FROM reqif_header LIMIT 1")
+        row = c.fetchone()
+        header = ReqIFHeader(
+            identifier=row[0],
+            creation_time=datetime.fromisoformat(row[1]),
+            repository_id=row[2],
+            reqif_tool_id=row[3],
+            reqif_version=row[4],
+            source_tool_id=row[5],
+            title=row[6],
         )
+        # Read data types.
+        dt = DataTypes()
+        c.execute("SELECT * FROM datatype_xhtml LIMIT 1")
+        row = c.fetchone()
+        if row:
+            dt.xhtml = DataTypeDefinitionXHTML(
+                identifier=row[0],
+                last_change=datetime.fromisoformat(row[1]) if row[1] else None,
+                long_name=row[2],
+            )
+        c.execute("SELECT * FROM datatype_enumeration LIMIT 1")
+        row = c.fetchone()
+        if row:
+            dt_enum = DataTypeDefinitionEnumeration(
+                identifier=row[0],
+                last_change=datetime.fromisoformat(row[1]) if row[1] else None,
+                long_name=row[2],
+                enum_values=[],
+            )
+            c.execute(
+                "SELECT * FROM enum_value WHERE enumeration_id=?", (dt_enum.identifier,)
+            )
+            for erow in c.fetchall():
+                ev = EnumValue(
+                    identifier=erow[0],
+                    last_change=datetime.fromisoformat(erow[2]) if erow[2] else None,
+                    long_name=erow[3],
+                    embedded_value=EmbeddedValue(key=erow[4], other_content=erow[5]),
+                )
+                dt_enum.enum_values.append(ev)
+            dt.enumeration = dt_enum
+        # Boolean.
+        c.execute("SELECT * FROM datatype_boolean LIMIT 1")
+        row = c.fetchone()
+        if row:
+            dt.boolean = DataTypeDefinitionBoolean(identifier=row[0], long_name=row[1])
+        # Date.
+        c.execute("SELECT * FROM datatype_date LIMIT 1")
+        row = c.fetchone()
+        if row:
+            dt.date = DataTypeDefinitionDate(identifier=row[0], long_name=row[1])
+        # Integer.
+        c.execute("SELECT * FROM datatype_integer LIMIT 1")
+        row = c.fetchone()
+        if row:
+            dt.integer = DataTypeDefinitionInteger(identifier=row[0], long_name=row[1])
+        # Real.
+        c.execute("SELECT * FROM datatype_real LIMIT 1")
+        row = c.fetchone()
+        if row:
+            dt.real = DataTypeDefinitionReal(identifier=row[0], long_name=row[1])
+        # String.
+        c.execute("SELECT * FROM datatype_string LIMIT 1")
+        row = c.fetchone()
+        if row:
+            dt.string = DataTypeDefinitionString(identifier=row[0], long_name=row[1])
+        # Read Spec Objects.
+        spec_objects = []
+        c.execute("SELECT * FROM spec_object")
+        for row in c.fetchall():
+            attributes = []
+            c.execute(
+                "SELECT definition_ref, value FROM spec_object_attribute WHERE spec_object_id=?",
+                (row[0],),
+            )
+            for arow in c.fetchall():
+                attributes.append(AttributeValue(definition_ref=arow[0], value=arow[1]))
+            spec_objects.append(
+                SpecObject(
+                    identifier=row[0],
+                    last_change=datetime.fromisoformat(row[1]) if row[1] else None,
+                    long_name=row[2],
+                    type_ref=row[3],
+                    attributes=attributes,
+                )
+            )
+        # Read Specifications and their hierarchies.
+        specifications = []
+        c.execute("SELECT * FROM specification")
+        spec_rows = c.fetchall()
+        for spec_row in spec_rows:
+            spec_id = spec_row[0]
+            hierarchies = []
+            c.execute(
+                "SELECT * FROM spec_hierarchy WHERE specification_id=?", (spec_id,)
+            )
+            for hrow in c.fetchall():
+                hierarchies.append(
+                    SpecHierarchy(
+                        identifier=hrow[0],
+                        last_change=(
+                            datetime.fromisoformat(hrow[2]) if hrow[2] else None
+                        ),
+                        long_name=hrow[3],
+                        is_editable=bool(hrow[4]),
+                        object_ref=hrow[5],
+                    )
+                )
+            specifications.append(
+                Specification(
+                    identifier=spec_row[0],
+                    last_change=(
+                        datetime.fromisoformat(spec_row[1]) if spec_row[1] else None
+                    ),
+                    long_name=spec_row[2],
+                    type_ref=spec_row[3],
+                    spec_hierarchies=hierarchies,
+                )
+            )
+        # Read tool extensions.
+        c.execute("SELECT content FROM tool_extensions WHERE id=1")
+        row = c.fetchone()
+        tool_extensions = row[0] if row else None
+        conn.close()
 
-    # Read spec_types.
-    cur.execute("SELECT type_key, type_value FROM spec_types")
-    for type_key, type_value in cur.fetchall():
-        doc.spec_types[type_key] = type_value
-
-    # Read spec hierarchy as flat records.
-    cur.execute("SELECT hier_id, object_id, parent_hier_id FROM spec_hierarchy")
-    rows = cur.fetchall()
-    conn.close()
-
-    # Build a mapping: hier_id -> (hier_id, object_id, parent_hier_id)
-    hier_map = {}
-    for hier_id, object_id, parent_hier_id in rows:
-        hier_map[hier_id] = {
-            "hier_id": hier_id,
-            "object_id": object_id,
-            "parent_hier_id": parent_hier_id,
-            "children": [],
-        }
-
-    # Organize into a tree by linking children.
-    root_nodes = []
-    for rec in hier_map.values():
-        parent_id = rec["parent_hier_id"]
-        if parent_id and parent_id in hier_map:
-            hier_map[parent_id]["children"].append(rec)
-        else:
-            root_nodes.append(rec)
-
-    # Convert flat dictionary tree into SpecHierarchy objects recursively.
-    def _build_hierarchy(rec):
-        children = [_build_hierarchy(child) for child in rec["children"]]
-        return SpecHierarchy(
-            hier_id=rec["hier_id"], object_id=rec["object_id"], children=children
+        reqif_content = ReqIFContent(
+            data_types=dt, spec_objects=spec_objects, specifications=specifications
         )
-
-    for rec in root_nodes:
-        doc.spec_hierarchies.append(_build_hierarchy(rec))
-
-    conn.close()
-    return doc
+        core_content = CoreContent(reqif_content=reqif_content)
+        return ReqIF(
+            header=header, core_content=core_content, tool_extensions=tool_extensions
+        )
