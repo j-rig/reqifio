@@ -16,7 +16,7 @@ The adapter serializes dictionary fields using repr() for simplicity.
 
 import csv
 import os
-from .model import ReqIFDocument, Requirement, SpecObject, SpecRelation
+from .model import ReqIFDocument, Requirement, SpecObject, SpecRelation, SpecHierarchy
 
 
 def write_doc_to_csv(doc: ReqIFDocument, folder_path: str):
@@ -81,6 +81,26 @@ def write_doc_to_csv(doc: ReqIFDocument, folder_path: str):
         writer.writerow(["type_key", "type_value"])
         for key, value in doc.spec_types.items():
             writer.writerow([key, value])
+
+    # Write spec_hierarchy.csv in a flat structure
+    with open(
+        os.path.join(folder_path, "spec_hierarchy.csv"),
+        "w",
+        newline="",
+        encoding="utf-8",
+    ) as shf:
+        writer = csv.writer(shf)
+        writer.writerow(["hier_id", "object_id", "parent_hier_id"])
+
+        def write_hierarchy_item(hier: SpecHierarchy, parent_hier_id):
+            writer.writerow(
+                [hier.hier_id, hier.object_id, parent_hier_id if parent_hier_id else ""]
+            )
+            for child in hier.children:
+                write_hierarchy_item(child, hier.hier_id)
+
+        for hier in doc.spec_hierarchies:
+            write_hierarchy_item(hier, None)
 
 
 def read_doc_from_csv(folder_path: str) -> ReqIFDocument:
@@ -151,5 +171,45 @@ def read_doc_from_csv(folder_path: str) -> ReqIFDocument:
         reader = csv.DictReader(stf)
         for row in reader:
             doc.spec_types[row["type_key"]] = row["type_value"]
+
+    # Read spec_hierarchy.csv and rebuild the hierarchy tree
+    hier_map = {}
+    with open(
+        os.path.join(folder_path, "spec_hierarchy.csv"),
+        "r",
+        newline="",
+        encoding="utf-8",
+    ) as shf:
+        reader = csv.DictReader(shf)
+        for row in reader:
+            hier_id = row["hier_id"]
+            object_id = row["object_id"]
+            parent_hier_id = (
+                row["parent_hier_id"] if row["parent_hier_id"] != "" else None
+            )
+            hier_map[hier_id] = {
+                "hier_id": hier_id,
+                "object_id": object_id,
+                "parent_hier_id": parent_hier_id,
+                "children": [],
+            }
+
+    # Link children to their corresponding parents
+    root_nodes = []
+    for item in hier_map.values():
+        parent_id = item["parent_hier_id"]
+        if parent_id and parent_id in hier_map:
+            hier_map[parent_id]["children"].append(item)
+        else:
+            root_nodes.append(item)
+
+    def build_hierarchy(item):
+        children = [build_hierarchy(child) for child in item["children"]]
+        return SpecHierarchy(
+            hier_id=item["hier_id"], object_id=item["object_id"], children=children
+        )
+
+    for root_item in root_nodes:
+        doc.spec_hierarchies.append(build_hierarchy(root_item))
 
     return doc

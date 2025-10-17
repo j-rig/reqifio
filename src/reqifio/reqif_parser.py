@@ -7,7 +7,7 @@ and SPEC-TYPES as per a fuller subset of the ReqIF schema.
 """
 
 import xml.etree.ElementTree as ET
-from .model import ReqIFDocument, Requirement, SpecObject, SpecRelation
+from .model import ReqIFDocument, Requirement, SpecObject, SpecRelation, SpecHierarchy
 
 
 def parse_reqif_file(file_path: str) -> ReqIFDocument:
@@ -115,6 +115,13 @@ def parse_reqif_file(file_path: str) -> ReqIFDocument:
                 # Using tag name as key and its text value for demonstration.
                 doc.spec_types[type_elem.tag] = type_elem.text
 
+        # Parse SpecHierarchy
+        spec_hier_elem = core_content.find("SPEC-HIERARCHY")
+        if spec_hier_elem is not None:
+            for item in spec_hier_elem.findall("SPEC-HIERARCHY-ITEM"):
+                hierarchy = _parse_hierarchy_item(item)
+                doc.add_spec_hierarchy(hierarchy)
+
     # Fallback for legacy files: If CORE-CONTENT not found, try top-level REQUIREMENTS.
     if not doc.requirements:
         requirements_elem = root.find("REQUIREMENTS")
@@ -139,3 +146,39 @@ def parse_reqif_file(file_path: str) -> ReqIFDocument:
                 doc.add_requirement(req)
 
     return doc
+
+
+def _parse_hierarchy_item(item_elem: ET.Element) -> SpecHierarchy:
+    """
+    Recursively parses a SPEC-HIERARCHY-ITEM element into a SpecHierarchy object.
+
+    Expected XML structure:
+        <SPEC-HIERARCHY-ITEM>
+          <ID>...</ID>
+          <OBJECT-ID>...</OBJECT-ID>
+          <CHILDREN>
+            <SPEC-HIERARCHY-ITEM>...</SPEC-HIERARCHY-ITEM>
+            ...
+          </CHILDREN>
+        </SPEC-HIERARCHY-ITEM>
+
+    Args:
+        item_elem: The XML element for the hierarchy item.
+
+    Returns:
+        A SpecHierarchy instance.
+    """
+    hier_id = (
+        item_elem.find("ID").text if item_elem.find("ID") is not None else "unknown"
+    )
+    object_id = (
+        item_elem.find("OBJECT-ID").text
+        if item_elem.find("OBJECT-ID") is not None
+        else ""
+    )
+    children = []
+    children_container = item_elem.find("CHILDREN")
+    if children_container is not None:
+        for child_item in children_container.findall("SPEC-HIERARCHY-ITEM"):
+            children.append(_parse_hierarchy_item(child_item))
+    return SpecHierarchy(hier_id=hier_id, object_id=object_id, children=children)

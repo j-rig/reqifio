@@ -6,7 +6,7 @@ Added tables include those for header, requirements, spec_objects, spec_relation
 """
 
 import sqlite3
-from .model import ReqIFDocument, Requirement, SpecObject, SpecRelation
+from .model import ReqIFDocument, Requirement, SpecObject, SpecRelation, SpecHierarchy
 
 
 def init_db(conn: sqlite3.Connection):
@@ -53,6 +53,16 @@ def init_db(conn: sqlite3.Connection):
         CREATE TABLE IF NOT EXISTS spec_types (
             type_key TEXT PRIMARY KEY,
             type_value TEXT
+        )
+    """
+    )
+    # SpecHierarchy table: flat structure with parent references.
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS spec_hierarchy (
+            hier_id TEXT PRIMARY KEY,
+            object_id TEXT,
+            parent_hier_id TEXT
         )
     """
     )
@@ -109,8 +119,33 @@ def write_doc_to_db(doc: ReqIFDocument, db_path: str):
             (key, str(value)),
         )
 
+    # Store spec hierarchy.
+    cur.execute("DELETE FROM spec_hierarchy")
+    for hier in doc.spec_hierarchies:
+        _store_hierarchy(cur, hier, parent_hier_id=None)
+
     conn.commit()
     conn.close()
+
+
+def _store_hierarchy(cur: sqlite3.Cursor, hier: SpecHierarchy, parent_hier_id):
+    """
+    Recursively stores a SpecHierarchy instance (and its children) in the database.
+
+    Args:
+        cur: SQLite cursor.
+        hier: SpecHierarchy instance.
+        parent_hier_id: The parent's hierarchy ID (or None if top-level).
+    """
+    cur.execute(
+        """
+        INSERT INTO spec_hierarchy (hier_id, object_id, parent_hier_id)
+        VALUES (?, ?, ?)
+    """,
+        (hier.hier_id, hier.object_id, parent_hier_id),
+    )
+    for child in hier.children:
+        _store_hierarchy(cur, child, parent_hier_id=hier.hier_id)
 
 
 def read_doc_from_db(db_path: str) -> ReqIFDocument:
@@ -153,10 +188,44 @@ def read_doc_from_db(db_path: str) -> ReqIFDocument:
             )
         )
 
-    # Read spec_types
+    # Read spec_types.
     cur.execute("SELECT type_key, type_value FROM spec_types")
     for type_key, type_value in cur.fetchall():
         doc.spec_types[type_key] = type_value
+
+    # Read spec hierarchy as flat records.
+    cur.execute("SELECT hier_id, object_id, parent_hier_id FROM spec_hierarchy")
+    rows = cur.fetchall()
+    conn.close()
+
+    # Build a mapping: hier_id -> (hier_id, object_id, parent_hier_id)
+    hier_map = {}
+    for hier_id, object_id, parent_hier_id in rows:
+        hier_map[hier_id] = {
+            "hier_id": hier_id,
+            "object_id": object_id,
+            "parent_hier_id": parent_hier_id,
+            "children": [],
+        }
+
+    # Organize into a tree by linking children.
+    root_nodes = []
+    for rec in hier_map.values():
+        parent_id = rec["parent_hier_id"]
+        if parent_id and parent_id in hier_map:
+            hier_map[parent_id]["children"].append(rec)
+        else:
+            root_nodes.append(rec)
+
+    # Convert flat dictionary tree into SpecHierarchy objects recursively.
+    def _build_hierarchy(rec):
+        children = [_build_hierarchy(child) for child in rec["children"]]
+        return SpecHierarchy(
+            hier_id=rec["hier_id"], object_id=rec["object_id"], children=children
+        )
+
+    for rec in root_nodes:
+        doc.spec_hierarchies.append(_build_hierarchy(rec))
 
     conn.close()
     return doc

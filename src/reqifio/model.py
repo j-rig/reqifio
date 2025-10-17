@@ -39,6 +39,22 @@ class SpecRelation:
 
 
 @dataclass
+class SpecHierarchy:
+    """
+    Represents the SPEC-HIERARCHY element as defined in ReqIF.
+
+    Attributes:
+        hier_id: A unique identifier for the hierarchy element.
+        object_id: A reference (spec_id) to the associated SpecObject.
+        children: Nested SpecHierarchy instances representing child nodes.
+    """
+
+    hier_id: str
+    object_id: str
+    children: List["SpecHierarchy"] = field(default_factory=list)
+
+
+@dataclass
 class ReqIFDocument:
     header: Dict[str, Any] = field(default_factory=dict)
     requirements: List[Requirement] = field(default_factory=list)
@@ -47,6 +63,7 @@ class ReqIFDocument:
     spec_types: Dict[str, Any] = field(
         default_factory=dict
     )  # Simplified spec types storage
+    spec_hierarchies: List[SpecHierarchy] = field(default_factory=list)
 
     def add_requirement(self, requirement: Requirement):
         self.requirements.append(requirement)
@@ -85,3 +102,11 @@ class ReqIFDocument:
             if rel.relation_id == relation_id:
                 return rel
         raise KeyError(f"SpecRelation with id {relation_id} not found.")
+
+    def add_spec_hierarchy(self, hierarchy: SpecHierarchy):
+        self.spec_hierarchies.append(hierarchy)
+
+    def remove_spec_hierarchy(self, hier_id: str):
+        self.spec_hierarchies = [
+            h for h in self.spec_hierarchies if h.hier_id != hier_id
+        ]

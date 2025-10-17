@@ -7,7 +7,7 @@ SPEC-RELATIONS, and SPEC-TYPES.
 """
 
 import xml.etree.ElementTree as ET
-from .model import ReqIFDocument, Requirement, SpecObject, SpecRelation
+from .model import ReqIFDocument, Requirement, SpecObject, SpecRelation, SpecHierarchy
 
 
 def write_reqif_file(doc: ReqIFDocument, file_path: str):
@@ -73,5 +73,46 @@ def write_reqif_file(doc: ReqIFDocument, file_path: str):
         type_elem = ET.SubElement(spec_types_elem, type_key)
         type_elem.text = str(type_value)
 
+    # Write SpecHierarchy.
+    if doc.spec_hierarchies:
+        hier_elem = ET.SubElement(core_content, "SPEC-HIERARCHY")
+        for hier in doc.spec_hierarchies:
+            hier_elem.append(_write_hierarchy_item(hier))
+
+    # Write out XML tree.
     tree = ET.ElementTree(root)
     tree.write(file_path, encoding="utf-8", xml_declaration=True)
+
+
+def _write_hierarchy_item(hier: SpecHierarchy) -> ET.Element:
+    """
+    Recursively writes a SpecHierarchy instance into a SPEC-HIERARCHY-ITEM element.
+
+    Expected XML structure:
+      <SPEC-HIERARCHY-ITEM>
+        <ID>...</ID>
+        <OBJECT-ID>...</OBJECT-ID>
+        <CHILDREN>
+          ... nested SPEC-HIERARCHY-ITEM elements ...
+        </CHILDREN>
+      </SPEC-HIERARCHY-ITEM>
+
+    Args:
+        hier: The SpecHierarchy instance.
+
+    Returns:
+        An Element representing the hierarchy item.
+    """
+    hier_item = ET.Element("SPEC-HIERARCHY-ITEM")
+    id_elem = ET.SubElement(hier_item, "ID")
+    id_elem.text = hier.hier_id
+    obj_id_elem = ET.SubElement(hier_item, "OBJECT-ID")
+    obj_id_elem.text = hier.object_id
+
+    # Write children if available.
+    if hier.children:
+        children_elem = ET.SubElement(hier_item, "CHILDREN")
+        for child in hier.children:
+            children_elem.append(_write_hierarchy_item(child))
+
+    return hier_item
