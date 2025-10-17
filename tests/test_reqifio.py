@@ -11,7 +11,7 @@ import sqlite3
 import unittest
 from xml.etree import ElementTree as ET
 
-# Import modules from our reqif_lib package.
+# Import modules from our reqifio package.
 from reqifio import reqif_parser, reqif_writer, sqlite_adapter, command, model
 
 # Minimal sample ReqIF content including CORE-CONTENT with a header and a requirement.
