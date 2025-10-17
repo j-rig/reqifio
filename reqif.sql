@@ -32,3 +32,10 @@ CREATE TABLE spec_types (
     type_key TEXT PRIMARY KEY,
     type_value TEXT
 );
+
+-- Table for spec hierarchy.
+CREATE TABLE IF NOT EXISTS spec_hierarchy (
+    hier_id TEXT PRIMARY KEY,
+    object_id TEXT,
+    parent_hier_id TEXT
+);
